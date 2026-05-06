@@ -1,45 +1,49 @@
 /* ========== AI Chat TOC - Octotree 风格侧边栏 ========== */
 
 /* ========== 右侧触发区域 ========== */
+/* 只占一个小图标的大小，避免遮挡页面滚动条/边缘交互 */
 #ai-chat-toc-trigger {
   position: fixed;
-  top: 0;
-  right: 0;
-  width: 24px;
-  height: 100vh;
+  top: 30%;
+  right: 4px;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 56px;
+  border-radius: 10px 0 0 10px;
   z-index: 99998;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   cursor: pointer;
-  background: transparent;
-  transition: background 0.2s, width 0.2s;
+  background: rgba(99, 102, 241, 0.08);
+  backdrop-filter: blur(4px);
+  transition: background 0.2s, right 0.2s, opacity 0.2s;
+  opacity: 0.5;
 }
 
 #ai-chat-toc-trigger:hover {
-  background: rgba(99, 102, 241, 0.08);
-  width: 28px;
+  background: rgba(99, 102, 241, 0.18);
+  opacity: 1;
+  right: 0;
 }
 
-/* 触发条上的图标 */
+/* 触发图标 */
 .trigger-icon {
-  font-size: 14px;
-  opacity: 0.4;
-  transition: opacity 0.2s, transform 0.2s;
-  writing-mode: vertical-rl;
+  font-size: 16px;
+  opacity: 0.85;
+  transition: transform 0.2s;
 }
 
 #ai-chat-toc-trigger:hover .trigger-icon {
-  opacity: 0.8;
   transform: scale(1.1);
 }
 
-/* 侧边栏打开时隐藏触发条图标 */
-#ai-chat-toc-trigger.sidebar-open .trigger-icon,
-#ai-chat-toc-trigger.sidebar-open .trigger-badge {
+/* 侧边栏打开时整个触发块隐藏 */
+#ai-chat-toc-trigger.sidebar-open {
   opacity: 0;
+  pointer-events: none;
 }
 
 /* 对话数量徽标 */
