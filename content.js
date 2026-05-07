@@ -648,6 +648,154 @@
     setInterval(onUrlChange, 1000);
   }
 
+  // ========== 调试报告 ==========
+  // 暴露在 window.__AI_CHAT_TOC_DEBUG__，本地生成 JSON、复制到剪贴板，不发任何网络请求
+  function safeCall(fn, fallback) {
+    try { return fn(); } catch (e) { return fallback; }
+  }
+
+  function getDomPath(el) {
+    if (!el || el.nodeType !== 1) return '';
+    const parts = [];
+    let node = el;
+    let depth = 0;
+    while (node && node.nodeType === 1 && node !== document.body && depth < 12) {
+      let part = node.tagName.toLowerCase();
+      if (node.id) {
+        part += `#${node.id}`;
+        parts.unshift(part);
+        break;
+      }
+      const cls = (node.getAttribute('class') || '').trim().split(/\s+/).filter(Boolean).slice(0, 2);
+      if (cls.length) part += '.' + cls.join('.');
+      const testId = node.getAttribute('data-testid') || node.getAttribute('data-test-id');
+      if (testId) part += `[data-testid="${testId}"]`;
+      const parent = node.parentElement;
+      if (parent) {
+        const sameTag = Array.from(parent.children).filter(c => c.tagName === node.tagName);
+        if (sameTag.length > 1) {
+          const idx = sameTag.indexOf(node) + 1;
+          part += `:nth-of-type(${idx})`;
+        }
+      }
+      parts.unshift(part);
+      node = node.parentElement;
+      depth++;
+    }
+    return parts.join(' > ');
+  }
+
+  function collectAttrCandidates(el) {
+    const out = [];
+    safeCall(() => {
+      const nodes = el.querySelectorAll('[aria-label], [title], [data-testid], [data-test-id]');
+      const seen = new Set();
+      Array.from(nodes).slice(0, 30).forEach(n => {
+        const entry = {
+          tag: n.tagName.toLowerCase(),
+          ariaLabel: n.getAttribute('aria-label') || null,
+          title: n.getAttribute('title') || null,
+          dataTestid: n.getAttribute('data-testid') || n.getAttribute('data-test-id') || null,
+        };
+        const key = JSON.stringify(entry);
+        if (!seen.has(key)) { seen.add(key); out.push(entry); }
+      });
+    }, null);
+    return out;
+  }
+
+  function collectImageCandidates(el) {
+    return safeCall(() => Array.from(el.querySelectorAll('img')).slice(0, 20).map(img => ({
+      src: (img.getAttribute('src') || '').slice(0, 200),
+      alt: img.getAttribute('alt') || null,
+      ariaLabel: img.getAttribute('aria-label') || null,
+      className: (img.getAttribute('class') || '').slice(0, 200),
+      width: img.naturalWidth || img.width || null,
+      height: img.naturalHeight || img.height || null,
+      domPath: getDomPath(img),
+    })), []);
+  }
+
+  function collectFileCandidates(el) {
+    return safeCall(() => {
+      const sel = '[data-test-id="uploaded-file"], [data-testid="uploaded-file"], ' +
+        '[class*="new-file-preview" i], [class*="attachment" i], [class*="file-card" i], a[download]';
+      return Array.from(el.querySelectorAll(sel)).slice(0, 20).map(node => ({
+        tag: node.tagName.toLowerCase(),
+        className: (node.getAttribute('class') || '').slice(0, 200),
+        ariaLabel: node.getAttribute('aria-label') || null,
+        dataTestid: node.getAttribute('data-testid') || node.getAttribute('data-test-id') || null,
+        download: node.getAttribute('download') || null,
+        text: (node.textContent || '').trim().slice(0, 200),
+        extractedName: safeCall(() => extractFileName(node), ''),
+        domPath: getDomPath(node),
+      }));
+    }, []);
+  }
+
+  function buildDebugReport() {
+    const adapter = currentAdapter;
+    const messages = safeCall(() => adapter ? adapter.getUserMessages() : [], []);
+    const msgArr = Array.from(messages || []);
+
+    const messagesReport = msgArr.map((el, index) => safeCall(() => {
+      const raw = safeCall(() => (el.textContent || '').trim(), '');
+      const tocText = safeCall(() => adapter.getMessageText(el), '');
+      const outer = safeCall(() => el.outerHTML || '', '');
+      return {
+        index,
+        textPreview: raw.slice(0, 300),
+        textLength: raw.length,
+        tocText,
+        domPath: getDomPath(el),
+        outerHTMLSample: outer.slice(0, 4000),
+        outerHTMLTruncated: outer.length > 4000,
+        imageCandidates: collectImageCandidates(el),
+        fileCandidates: collectFileCandidates(el),
+        attrCandidates: collectAttrCandidates(el),
+      };
+    }, { index, error: 'extraction_failed' }));
+
+    return {
+      generatedAt: new Date().toISOString(),
+      url: safeCall(() => location.href, ''),
+      hostname: safeCall(() => location.hostname, ''),
+      platform: adapter ? adapter.name : null,
+      userAgent: safeCall(() => navigator.userAgent, ''),
+      messageCount: msgArr.length,
+      observedContainerPath: safeCall(() => getDomPath(observedContainer), ''),
+      chatContainerPath: safeCall(() => getDomPath(adapter && adapter.getChatContainer()), ''),
+      messages: messagesReport,
+    };
+  }
+
+  // 通过 CustomEvent 与主世界的 debug-bridge.js 通信
+  // 隔离 world 的 window 对页面控制台不可见，所以必须走桥接
+  document.addEventListener('__AI_CHAT_TOC_DEBUG_REQ__', (e) => {
+    const detail = e.detail || {};
+    const id = detail.id;
+    const action = detail.action;
+    let payload = null;
+    let error = null;
+    try {
+      const report = buildDebugReport();
+      if (action === 'copyReport') {
+        const json = JSON.stringify(report, null, 2);
+        console.log('[AI Chat TOC] 调试报告:', report);
+        console.log(`[AI Chat TOC] 报告长度: ${json.length} 字符`);
+        payload = { report, json };
+      } else {
+        payload = { report };
+      }
+    } catch (err) {
+      error = (err && err.message) || String(err);
+      console.error('[AI Chat TOC] 调试报告生成失败:', err);
+    }
+    document.dispatchEvent(new CustomEvent('__AI_CHAT_TOC_DEBUG_RES__', {
+      detail: { id, payload, error },
+    }));
+  });
+
   // ========== 初始化 ==========
   function init() {
     currentAdapter = detectPlatform();

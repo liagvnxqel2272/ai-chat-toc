@@ -93,7 +93,11 @@ http-client.private.env.json
 *.zip
 
 # ===== Claude Code / 本地工具 =====
+CLAUDE.md
 .claude/
+
+# ===== Codex =====
+AGENTS.md
 
 # ===== VSCode =====
 .vscode/
